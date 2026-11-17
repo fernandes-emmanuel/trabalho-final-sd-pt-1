@@ -12,6 +12,12 @@ melhorias nos protocolos de comunicação:
 - **(b)** o multicast entre os peers **continua sobre sockets UDP**, mas agora trata **perda de
   mensagens** (confirmações e retransmissão) e garante **ordenação FIFO** por remetente.
 
+## Integrantes – Grupo K
+
+- Emmanuel Fernandes Castro
+- Monik Alves da Costa
+- Luis Cesar Ferreira do Carmo
+
 ## Sumário
 
 1. [Funcionalidades](#funcionalidades)
