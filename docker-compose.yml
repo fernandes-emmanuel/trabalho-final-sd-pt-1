@@ -1,0 +1,43 @@
+x-mpcomm: &mpcomm
+  image: mpcomm:latest
+  build: .
+  environment: &environment
+    MPCOMM_GROUP_MANAGER: group-manager:5680
+    MPCOMM_LOG_LEVEL: info
+
+x-peer: &peer
+  <<: *mpcomm
+  command: ["mpcomm", "peer"]
+  cap_add: [NET_ADMIN]
+  depends_on: [group-manager]
+
+services:
+  group-manager:
+    <<: *mpcomm
+    command: ["mpcomm", "group-manager"]
+
+  peer-region-a:
+    <<: *peer
+    deploy:
+      replicas: 4
+    environment:
+      <<: *environment
+      NETEM: ${REGION_A_NETEM-delay 2ms 1ms}
+
+  peer-region-b:
+    <<: *peer
+    deploy:
+      replicas: 2
+    environment:
+      <<: *environment
+      NETEM: ${REGION_B_NETEM-delay 120ms 60ms distribution normal loss 10%}
+
+  coordinator:
+    <<: *mpcomm
+    command: ["mpcomm", "coordinator", "--peers", "6"]
+    depends_on: [group-manager, peer-region-a, peer-region-b]
+    stdin_open: true
+    tty: true
+    profiles: [coordinator]
+    volumes:
+      - ./results:/app/results
