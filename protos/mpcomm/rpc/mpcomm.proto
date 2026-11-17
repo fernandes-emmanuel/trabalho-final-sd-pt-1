@@ -1,0 +1,80 @@
+syntax = "proto3";
+
+package mpcomm;
+
+message Empty {}
+
+message PeerInfo {
+  int32 peer_id = 1;
+  string host = 2;
+  int32 udp_port = 3;
+  int32 control_port = 4;
+}
+
+message RegisterRequest {
+  string host = 1;
+  int32 udp_port = 2;
+  int32 control_port = 3;
+}
+
+message RegisterReply {
+  int32 peer_id = 1;
+}
+
+message UnregisterRequest {
+  int32 peer_id = 1;
+}
+
+message PeerList {
+  repeated PeerInfo peers = 1;
+}
+
+service GroupManager {
+  rpc Register(RegisterRequest) returns (RegisterReply);
+  rpc Unregister(UnregisterRequest) returns (Empty);
+  rpc ListPeers(Empty) returns (PeerList);
+  rpc Shutdown(Empty) returns (Empty);
+}
+
+message StartRequest {
+  int32 round_id = 1;
+  int32 messages_per_peer = 2;
+  string report_to = 3;
+}
+
+message StartReply {
+  int32 peer_id = 1;
+  int32 group_size = 2;
+}
+
+service PeerControl {
+  rpc Start(StartRequest) returns (StartReply);
+  rpc Shutdown(Empty) returns (Empty);
+}
+
+message DeliveredMessage {
+  int32 sender = 1;
+  int32 number = 2;
+}
+
+message PeerStats {
+  int64 data_sent = 1;
+  int64 retransmissions = 2;
+  int64 acks_sent = 3;
+  int64 duplicates_discarded = 4;
+  int64 held_back = 5;
+  int64 dropped_by_fault_injector = 6;
+  repeated int32 unreachable_peers = 7;
+}
+
+message RoundLog {
+  int32 round_id = 1;
+  int32 peer_id = 2;
+  bool completed = 3;
+  repeated DeliveredMessage delivered = 4;
+  PeerStats stats = 5;
+}
+
+service Comparison {
+  rpc SubmitLog(RoundLog) returns (Empty);
+}

@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mpcomm"
+version = "1.0.0"
+description = "Comunicação multicast com RPC (gRPC) e multicast UDP confiável com ordenação FIFO"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "grpcio>=1.85.1",
+    "protobuf>=7.35.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "grpcio-tools>=1.85.1",
+    "pytest>=8.0",
+    "ruff>=0.6",
+]
+
+[project.scripts]
+mpcomm = "mpcomm.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["mpcomm*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["mpcomm/rpc/mpcomm_pb2*"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["integration: sobe processos reais em localhost"]
