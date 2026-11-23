@@ -72,7 +72,9 @@ class ReliableFifoMulticast:
 
     Senders number their messages and keep them until every member acknowledges them,
     retransmitting on timeout. Receivers acknowledge every copy, discard duplicates and
-    hold back messages that arrive ahead of a gap until the gap is filled.
+    hold back messages that arrive ahead of a gap until the gap is filled. A member is
+    given up on only after it stays silent (no data and no acknowledgement) for
+    ``give_up_after`` seconds while a message is waiting for it.
     """
 
     def __init__(
@@ -102,6 +104,7 @@ class ReliableFifoMulticast:
         self._expected = dict.fromkeys(self._members, 0)
         self._holdback: dict[int, dict[int, DataPacket]] = {member: {} for member in self._members}
         self._unreachable: set[int] = set()
+        self._last_heard = dict.fromkeys(self._members, clock())
         self._rtt = RttEstimator(self._policy)
         self.counters = ReliabilityCounters()
 
@@ -146,9 +149,11 @@ class ReliableFifoMulticast:
             for seq, outgoing in list(self._outgoing.items()):
                 if seq not in self._outgoing or outgoing.deadline > now:
                     continue
-                if now - outgoing.first_sent >= self._policy.give_up_after:
-                    self._give_up_on(set(outgoing.waiting))
-                    continue
+                silent = self._silent_members(outgoing, now)
+                if silent:
+                    self._give_up_on(silent)
+                    if not outgoing.waiting:
+                        continue
                 outgoing.retransmitted = True
                 outgoing.timeout = min(outgoing.timeout * 2, self._policy.max_timeout)
                 outgoing.deadline = now + outgoing.timeout
@@ -168,6 +173,7 @@ class ReliableFifoMulticast:
             return
         self._acknowledge(packet)
         with self._lock:
+            self._last_heard[packet.sender] = self._clock()
             expected = self._expected[packet.sender]
             held = self._holdback[packet.sender]
             if packet.seq < expected or packet.seq in held:
@@ -193,18 +199,29 @@ class ReliableFifoMulticast:
         self._channel.send(encode(ack), self._members[packet.sender])
 
     def _on_ack(self, ack: AckPacket) -> None:
-        if ack.origin != self._self_id:
+        if ack.origin != self._self_id or ack.acker not in self._members:
             return
         with self._lock:
+            now = self._clock()
+            self._last_heard[ack.acker] = now
             outgoing = self._outgoing.get(ack.seq)
             if outgoing is None or ack.acker not in outgoing.waiting:
                 return
             if not outgoing.retransmitted:
-                self._rtt.observe(self._clock() - outgoing.first_sent)
+                self._rtt.observe(now - outgoing.first_sent)
             outgoing.waiting.discard(ack.acker)
             if not outgoing.waiting:
                 del self._outgoing[ack.seq]
                 self._notify_if_idle()
+
+    def _silent_members(self, outgoing: _Outgoing, now: float) -> set[int]:
+        """Members we have been waiting for without hearing anything from them."""
+        return {
+            member
+            for member in outgoing.waiting
+            if now - max(outgoing.first_sent, self._last_heard[member])
+            >= self._policy.give_up_after
+        }
 
     def _give_up_on(self, members: set[int]) -> None:
         newly_unreachable = members - self._unreachable

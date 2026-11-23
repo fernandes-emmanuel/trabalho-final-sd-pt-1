@@ -170,6 +170,31 @@ def test_unresponsive_member_is_eventually_declared_unreachable():
     assert node.wait_until_acknowledged(0)
 
 
+@pytest.mark.parametrize("sign_of_life", ["data", "ack"])
+def test_member_that_keeps_talking_is_not_declared_unreachable(sign_of_life):
+    now = [0.0]
+    channel, delivered = RecordingChannel(), []
+    policy = RetransmissionPolicy(initial_timeout=0.1, max_timeout=0.2, give_up_after=1.0)
+    node = make_node(channel, delivered, clock=lambda: now[0], policy=policy)
+    node.multicast(Kind.DATA, "x")
+    node.handle(AckPacket(ROUND, 0, 0, 0))
+
+    for step in range(1, 31):
+        now[0] = step / 10
+        if sign_of_life == "data":
+            node.handle(DataPacket(ROUND, 1, step - 1, Kind.DATA, step))
+        else:
+            node.handle(AckPacket(ROUND, 1, 0, 99))
+        node.retransmit_due()
+
+    assert not node.unreachable
+    assert not node.wait_until_acknowledged(0)
+
+    now[0] += 1.5
+    node.retransmit_due()
+    assert node.unreachable == {1}
+
+
 def test_rtt_estimator_converges_and_respects_bounds():
     policy = RetransmissionPolicy(initial_timeout=0.2, min_timeout=0.05, max_timeout=2.0)
     estimator = RttEstimator(policy)

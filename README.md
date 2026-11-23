@@ -46,8 +46,9 @@ melhorias nos protocolos de comunicação:
 - **Injeção de falhas na aplicação** (perda, duplicação, atraso e jitter, com *seed* para
   reprodutibilidade) e **injeção de falhas no kernel** via `tc netem` nos contêineres Docker.
 - **RTO adaptativo** (Jacobson/Karels, com o algoritmo de Karn) e *backoff* exponencial.
-- **Detecção de peers inalcançáveis**: o peer desiste depois de um tempo configurável, em vez de
-  travar para sempre.
+- **Detecção de peers inalcançáveis**: um peer que fica sem dar sinal de vida por um tempo
+  configurável (`--give-up-after`, 30 s por padrão) deixa de ser esperado, em vez de travar o grupo
+  para sempre.
 - Execução **local com um único comando**, execução **distribuída com Docker Compose**, simulando
   duas regiões geográficas, e execução em **máquinas reais/nuvem**.
 - Relatórios em texto e em JSON, testes automatizados e integração contínua no Linux e no Windows.
@@ -169,15 +170,19 @@ chamadas em localhost, num Windows 11 com Python 3.14:
 
 Leitura dos resultados:
 
-- **Grupos pequenos:** o socket puro é cerca de 20% mais rápido que o gRPC com canal persistente
-  e duas vezes mais rápido que o gRPC com canal novo por chamada. É o custo do HTTP/2 e da
-  negociação do canal, e por isso os clientes desta versão reutilizam o canal sempre que possível.
+- **Grupos pequenos:** nesta medição no Windows, o socket puro é cerca de 20% mais rápido que o
+  gRPC com canal persistente e duas vezes mais rápido que o gRPC com canal novo por chamada. No
+  Linux (Python 3.12, 500 chamadas), a vantagem do socket é bem maior: cerca de 10 vezes (0,03 ms
+  contra 0,33 ms com canal persistente). Nos dois casos é o custo do HTTP/2 e da negociação do
+  canal, e por isso os clientes desta versão reutilizam o canal sempre que possível.
 - **Grupos maiores:** com 300 peers, a lista serializada passa de 2048 bytes e o protocolo
   original **falha em 100% das chamadas**. O `recv(2048)` corta a mensagem e o `pickle.loads`
   falha. O gRPC continua funcionando sem nenhuma mudança, porque o enquadramento é responsabilidade
   do framework.
 - **Tamanho das mensagens:** a resposta do gRPC é maior porque carrega mais informação: `id` e
-  portas de cada peer, não só o IP. A requisição vazia ocupa 0 bytes em Protobuf.
+  portas de cada peer, não só o IP. A requisição vazia ocupa 0 bytes em Protobuf. As colunas de
+  bytes medem só o conteúdo serializado: na rede, o gRPC ainda acrescenta os cabeçalhos HTTP/2 e
+  5 bytes de enquadramento por mensagem.
 
 **Conclusão:** para as interações cliente-servidor deste sistema, que são de controle, pouco
 frequentes e fora do caminho crítico das mensagens, a diferença de latência em sub-milissegundos é
@@ -215,8 +220,13 @@ As mensagens UDP são JSON (o `pickle` foi eliminado também aqui):
    (*backoff* exponencial, até 2 s).
 4. O prazo inicial vem de um estimador de RTT (Jacobson/Karels: `RTO = SRTT + 4·RTTVAR`). Segundo o
    algoritmo de Karn, amostras de mensagens retransmitidas são descartadas, por serem ambíguas.
-5. Se um membro não confirma durante `give_up_after` (30 s), ele é declarado **inalcançável** e
-   deixa de ser esperado. A rodada termina e é marcada como incompleta, em vez de travar.
+5. Se um membro fica `give_up_after` segundos (30 s por padrão, opção `--give-up-after`) **sem dar
+   nenhum sinal de vida**, nem dados nem ACKs, enquanto há mensagens esperando por ele, ele é
+   declarado **inalcançável** e deixa de ser esperado. A rodada termina e é marcada como
+   incompleta, em vez de travar. O critério é o silêncio do peer, e não o tempo de uma única
+   mensagem pendente: com 40% de perda, os ACKs de uma mensagem às vezes se perdem por 30 s
+   seguidos, e o critério antigo declarava inalcançáveis peers que estavam vivos e entregando
+   tudo (em 10% a 30% das rodadas simuladas; com o critério atual, em nenhuma).
 
 **Receptor:**
 
@@ -343,6 +353,11 @@ As condições de rede podem ser trocadas sem editar arquivos:
 REGION_B_NETEM="delay 200ms 100ms loss 25%" docker compose up -d --force-recreate
 ```
 
+A imagem usa o resolvedor DNS nativo do gRPC (`GRPC_DNS_RESOLVER=native`). Em algumas instalações
+do Docker, o resolvedor padrão (c-ares) leva cerca de 6 s para resolver os nomes dos serviços, o
+que estourava o prazo de 5 s das chamadas do coordenador. Por precaução, o coordenador também trata
+`DEADLINE_EXCEEDED` como "ainda não disponível" enquanto espera os peers se registrarem.
+
 ### 4. Máquinas reais ou nuvem
 
 O código não tem endereços fixos. Em cada máquina, basta informar onde está o group manager e o
@@ -415,14 +430,14 @@ Total order       : 166 of 180 positions differ across peers
 ## Testes
 
 ```bash
-pytest -v                  # 50 testes, incluindo integração com processos reais
+pytest -v                  # 52 testes, incluindo integração com processos reais
 pytest -m "not integration"
 ruff check . && ruff format --check .
 ```
 
 | Arquivo | O que verifica |
 |---|---|
-| `tests/test_reliable.py` | Protocolo confiável em uma **rede simulada determinística** (relógio virtual, 30% de perda, 10% de duplicação e reordenação, 12 *seeds*): entrega completa, FIFO, sem duplicatas; *holdback*; ACK de duplicatas; isolamento de rodadas; *backoff* exponencial; detecção de peer inalcançável; estimador de RTT |
+| `tests/test_reliable.py` | Protocolo confiável em uma **rede simulada determinística** (relógio virtual, 30% de perda, 10% de duplicação e reordenação, 12 *seeds*): entrega completa, FIFO, sem duplicatas; *holdback*; ACK de duplicatas; isolamento de rodadas; *backoff* exponencial; detecção de peer inalcançável, sem falso positivo para quem continua se comunicando; estimador de RTT |
 | `tests/test_analysis.py` | Métricas do coordenador (FIFO, completude, duplicatas, divergência de ordem total) |
 | `tests/test_group_manager.py` | Serviço gRPC real: registro, listagem, saída, re-registro e códigos de erro |
 | `tests/test_messages.py` | Codificação das mensagens UDP e rejeição de datagramas malformados |
@@ -460,4 +475,7 @@ com Docker Compose.
 - O group manager é um ponto único de falha e guarda a lista de membros só em memória.
 - Os canais gRPC não são cifrados (`insecure_channel`). Num ambiente real, o próximo passo seria
   TLS.
+- A detecção de inalcançáveis é por tempo limite, como todo detector de falhas num sistema
+  assíncrono: sob perda extrema, um peer vivo ainda pode ser suspeito. Nesse caso a rodada é
+  marcada como incompleta, mesmo que todas as mensagens tenham sido entregues.
 - Como esperado nesta etapa, a ordenação é FIFO, não total.

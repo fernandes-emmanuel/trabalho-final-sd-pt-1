@@ -12,6 +12,7 @@ RUN pip install --no-cache-dir .
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
-ENV PYTHONUNBUFFERED=1
+ENV PYTHONUNBUFFERED=1 \
+    GRPC_DNS_RESOLVER=native
 ENTRYPOINT ["entrypoint.sh"]
 CMD ["mpcomm", "--help"]

@@ -20,6 +20,7 @@ from mpcomm.model import Endpoint
 from mpcomm.peer.node import PeerNode, PeerSettings
 from mpcomm.peer.round import RoundTiming
 from mpcomm.transport.faults import FaultProfile
+from mpcomm.transport.reliable import RetransmissionPolicy
 
 DEFAULT_GROUP_MANAGER = "localhost:5680"
 DEFAULT_COORDINATOR_PORT = 5678
@@ -67,6 +68,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     peer.add_argument("--min-interval-ms", type=float, default=10.0)
     peer.add_argument("--max-interval-ms", type=float, default=100.0)
+    peer.add_argument(
+        "--give-up-after",
+        type=float,
+        default=float(_env("GIVE_UP_AFTER", str(RetransmissionPolicy().give_up_after))),
+        help="seconds without any sign of life before a peer is declared unreachable",
+    )
     _add_fault_options(peer)
     peer.set_defaults(handler=_run_peer)
 
@@ -107,6 +114,8 @@ def _run_group_manager(args: argparse.Namespace) -> int:
 
 
 def _run_peer(args: argparse.Namespace) -> int:
+    if args.give_up_after <= 0:
+        raise ValueError("--give-up-after must be positive")
     settings = PeerSettings(
         group_manager=args.group_manager,
         bind_host=args.bind,
@@ -117,6 +126,7 @@ def _run_peer(args: argparse.Namespace) -> int:
         timing=RoundTiming(
             min_interval=args.min_interval_ms / 1000, max_interval=args.max_interval_ms / 1000
         ),
+        policy=RetransmissionPolicy(give_up_after=args.give_up_after),
     )
     PeerNode(settings).run()
     return 0

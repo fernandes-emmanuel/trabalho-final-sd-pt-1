@@ -23,6 +23,7 @@ from mpcomm.rpc.server import start_server, stop_server
 log = logging.getLogger(__name__)
 
 PEER_POLL_INTERVAL = 0.5
+NOT_READY_YET = frozenset({grpc.StatusCode.UNAVAILABLE, grpc.StatusCode.DEADLINE_EXCEEDED})
 
 
 class CoordinatorError(Exception):
@@ -125,7 +126,7 @@ class ExperimentCoordinator:
         try:
             return self._group_manager.list_peers()
         except grpc.RpcError as error:
-            if error.code() != grpc.StatusCode.UNAVAILABLE:
+            if error.code() not in NOT_READY_YET:
                 raise
             return []
 

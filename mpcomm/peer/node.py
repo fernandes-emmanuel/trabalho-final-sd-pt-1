@@ -16,6 +16,7 @@ from mpcomm.rpc.server import start_server, stop_server, wait_until_stopped
 from mpcomm.transport.channel import Channel
 from mpcomm.transport.faults import FaultProfile, FaultyChannel
 from mpcomm.transport.messages import AckPacket, DataPacket, MalformedPacket, decode, encode
+from mpcomm.transport.reliable import RetransmissionPolicy
 from mpcomm.transport.udp import UdpEndpoint
 
 log = logging.getLogger(__name__)
@@ -30,6 +31,7 @@ class PeerSettings:
     control_port: int
     faults: FaultProfile = field(default_factory=FaultProfile)
     timing: RoundTiming = field(default_factory=RoundTiming)
+    policy: RetransmissionPolicy = field(default_factory=RetransmissionPolicy)
     registration_timeout: float = 30.0
 
 
@@ -101,6 +103,7 @@ class PeerNode:
                 channel=self._channel,
                 messages=messages,
                 timing=self._settings.timing,
+                policy=self._settings.policy,
             )
         except BaseException:
             with self._lock:
